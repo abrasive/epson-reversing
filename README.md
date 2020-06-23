@@ -29,3 +29,7 @@ The Huffman data is stored just like a JPEG DHT, even down to the marker value.
 Curiously, the ARM code that decodes CROMs in the printer doesn't actually decode the Huffman tables.
 Instead, it passes it off to somewhere else - either a hardware decoder, or one of the Xtensa cores.
 (The REALOID-based printer I dug this out of uses a pile of Xtensa cores to replace fixed-function image processing hardware.)
+
+# rcx_correct
+
+This tool corrects the checksums (sums and SHA-1) in .rcx files so the printer will accept them.

@@ -1,0 +1,87 @@
+#!/usr/bin/env python
+
+# Correct the checksums in EPSON IPL blocks in an .rcx firmware file.
+# James Wah 2020
+# This file is in the public domain.
+
+import sys
+from collections import defaultdict
+import hashlib
+import struct
+
+if len(sys.argv) != 3:
+    print("usage: %s infile.rcx outfile.rcx" % sys.argv[0])
+
+with open(sys.argv[1], 'rb') as fp:
+    data = fp.read()
+
+fp = open(sys.argv[2], 'w+b')
+fp.write(data)
+
+header_end = data.index(b'\f') + 1
+
+def parse_header():
+    header = data[:header_end-1].decode('ascii')
+    lines = header.split('\r\n')
+    assert lines[0] == 'RCX'
+    assert lines[1] == 'SEIKO EPSON EpsonNet Form'
+
+    cur_section = ''
+    cfg = defaultdict(dict)
+
+    for line in lines[2:]:
+        if line.startswith('[') and line.endswith(']'):
+            cur_section = line[1:-1]
+            continue
+
+        if line.strip() == '':
+            continue
+
+        key, value = line.split('=', 1)
+        assert value.startswith('"') and value.endswith('"')
+
+        cfg[cur_section][key] = value[1:-1]
+
+    return cfg
+
+def correct_ipl(offset):
+    fp.seek(offset, 0)
+    ipl_header = fp.read(0x100)
+
+    assert ipl_header[:9] == b'EPSON IPL'
+
+    header_hash = hashlib.sha1(ipl_header[:0xe])
+
+    hitem_bytes, = struct.unpack('<H', ipl_header[0xe:0x10])
+    hitems = hitem_bytes // 0x24
+    assert hitems == 3
+
+    for idx, body_base in enumerate([0x1000, 0x3000]):
+        hdr_base = 0x10 + 0x24*idx
+        hi_data = ipl_header[hdr_base:hdr_base+0x10]
+        f0, f2, f4, _, f8, _, length = struct.unpack('<HHHHHHL', hi_data)
+
+        fp.seek(offset + body_base, 0)
+        checksum = sum(bytearray(fp.read(length)))
+        fp.seek(offset + hdr_base + 2)
+        fp.write(struct.pack('<H', checksum & 0xffff))
+
+        if idx > 0:
+            fp.seek(offset + body_base, 0)
+            body_hash = hashlib.sha1(fp.read(length))
+            body_hash.update(header_hash.digest())
+
+            fp.seek(offset + hdr_base + 0x10)
+            fp.write(body_hash.digest())
+
+
+cfg = parse_header()
+
+correct_ipl(header_end)
+
+for name, section in cfg.items():
+    if name.startswith('Z_'):
+        address = int(section['5'])
+        offset = header_end + address
+        if data[offset:offset+9] == b'EPSON IPL':
+            correct_ipl(offset)
