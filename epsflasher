@@ -1,0 +1,138 @@
+#!/usr/bin/env python
+
+import dirty4
+import argparse
+import rcx
+import sys
+import os
+import time
+import logging
+
+# optional, non-core modules
+try:
+    import tqdm
+except:
+    pass
+
+try:
+    import colorlog
+except:
+    colorlog = logging
+
+parser = argparse.ArgumentParser(description='Flash a firmware to an Epson printer.')
+parser.add_argument('filename', metavar='firmware.rcx',
+                    help='file to flash (RCX format)')
+parser.add_argument('--device', default='/dev/usb/lp0',
+                    help='printer to flash')
+parser.add_argument('-d', '--debug', action='store_true',
+                    help='output lots of debug spam')
+parser.add_argument('--only-first-block', action='store_true',
+                    help='only write the first firmware block; useful when the printer is in recovery mode')
+args = parser.parse_args()
+
+log_level = logging.INFO
+if args.debug:
+    log_level = logging.DEBUG
+
+logformat = '%(levelname)-8s %(message)s'
+if colorlog != logging:
+    logformat = '%(log_color)s' + logformat
+colorlog.basicConfig(level=log_level, format=logformat)
+
+rcx_content = open(args.filename, 'rb').read()
+header_len, cfg = rcx.parse_rcx(rcx_content)
+
+block_sizes = []
+for name, section in cfg.items():
+    if name.startswith('Z_'):
+        block_sizes.append(int(section['5']))
+
+firmware_blob = rcx_content[header_len:]
+
+if len(firmware_blob) != sum(block_sizes):
+    logging.error("Firmware blob is %d bytes long but the header suggests %d" % (len(firmware_blob), sum(block_sizes)))
+    sys.exit(1)
+
+if args.only_first_block:
+    firmware_blob = firmware_blob[:block_sizes[0]]
+
+def strip_pref_suff(string, prefix, suffix=';\f'):
+    if not string.startswith(prefix):
+        logging.error("Unexpected response %s does not start with %s" % (repr(string), repr(prefix)))
+        sys.exit(1)
+
+    if not string.endswith(suffix):
+        logging.error("Unexpected response %s does not end with %s" % (repr(string), repr(suffix)))
+        sys.exit(1)
+
+    return string[len(prefix):-len(suffix)]
+
+port = os.open(args.device, os.O_RDWR | os.O_SYNC)
+d4 = dirty4.Dirty4(port)
+
+with d4.channel("EPSON-CTRL") as chan:
+    version_info = strip_pref_suff(chan.cmd3('vi', 1, 0, 4), 'vi:04:')
+    logging.info("Original firmware version: '%s'" % version_info)
+
+    strip_pref_suff(chan.cmd3('fl', 1, 0, 1), 'fl:')
+
+    gm_stat = strip_pref_suff(chan.cmd3('gm', 1, 0, 1), 'fl:01:')
+
+    if gm_stat != 'OK':
+        logging.error("Entering firmware download mode returned status '%s'" % gm_stat)
+        sys.exit(1)
+
+logging.info("Writing firmware...")
+
+progress = None
+try:
+    bar = tqdm.tqdm(total=len(firmware_blob), unit='byte', unit_scale=True, unit_divisor=1024)
+    def progress(increment):
+        bar.update(increment)
+except:
+    pass
+
+with d4.channel("EPSON-DATA") as chan:
+    chan.write(firmware_blob, progress=progress)
+
+if progress:
+    bar.close()
+
+with d4.channel("EPSON-CTRL") as chan:
+    gm_stat = strip_pref_suff(chan.cmd3('gm', 1, 0, 3), 'fl:03:')
+
+    if gm_stat != 'OK':
+        logging.warning("Leaving firmware download mode returned status '%s'" % gm_stat)
+        sys.exit(1)
+
+logging.info("Waiting for printer to go away...")
+try:
+    while True:
+        os.read(port, 1024)
+        time.sleep(0.1)
+except OSError:
+    pass
+
+os.close(port)
+
+logging.info("Waiting for printer to come back...")
+while True:
+    try:
+        port = os.open(args.device, os.O_RDWR | os.O_SYNC)
+        break
+    except OSError:
+        time.sleep(1)
+
+d4 = dirty4.Dirty4(port)
+
+logging.info("Waiting for printer to be ready...")
+with d4.channel("EPSON-CTRL") as chan:
+    while True:
+        version_info = strip_pref_suff(chan.cmd3('vi', 1, 0, 4), 'vi:04:')
+
+        if version_info != 'BUSY':
+            break
+
+        time.sleep(1)
+
+logging.info("OK. New firmware version: '%s'" % version_info)

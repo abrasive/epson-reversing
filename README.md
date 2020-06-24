@@ -33,3 +33,32 @@ Instead, it passes it off to somewhere else - either a hardware decoder, or one 
 # rcx_correct
 
 This tool corrects the checksums (sums and SHA-1) in .rcx files so the printer will accept them.
+
+# epsflasher
+
+This tool allows you to flash .rcx format firmware to your printer via USB.
+
+It speaks the IEEE 1284.4 multiplexing protocol (aka Dot4 or D4),
+although it doesn't actually support multiple open channels at a time.
+
+You can load firmware in normal operating mode, or in recovery mode.
+You may not be able to flash an entire .rcx in recovery mode.
+
+## Printer recovery mode
+
+These printers have a bootloader/recovery mode which can be accessed by holding down a key combo at power on.
+A surprising number of these can be found [on YouTube](https://www.youtube.com/watch?v=36bkBq_aOxI),
+because some people are flogging a modded firmware that ignores empty or unlicensed ink cartridges.
+I don't know yet why it needs to be loaded from the bootloader - perhaps there are further integrity checks?
+
+On my XP-240, which has no LCD and six buttons on the front panel, you turn the printer off, then hold the two rightmost and two leftmost buttons (stop, colour copy, wifi, and power) for 2 seconds.
+The LEDs then turn on in a unique blink pattern to show it's in recovery mode.
+
+My printer firmware has two parts in the RCX: the second appears, perhaps, to be scanner firmware.
+Each starts with an EPSON IPL header and their lengths are stored in the RCX header.
+
+If I try and flash the whole thing in bootloader mode, the bootloader crashes.
+But if I flash only the first block, it seems to succeed.
+So a switch to `epsflasher`, `--only-first-block`, allows you to just flash the first block, if this is what you need.
+
+I don't yet know how to detect that a printer is in recovery mode.
