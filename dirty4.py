@@ -85,9 +85,11 @@ class DirtyChannelContext(object):
         self.d4.Credit(self.sid, 1)
         return self.d4.read_packet()
 
-    def cmd3(self, name, arg0, arg1, arg2, binary=False):
+    def cmd2(self, name, payload, binary=False):
         assert len(name) == 2
-        self.write(name.encode('ascii') + struct.pack('BBB', arg0, arg1, arg2))
+        if isinstance(payload, int):
+            payload = bytearray([payload])
+        self.write(name.encode('ascii') + struct.pack('<H', len(payload)) + payload)
         result = self.read().payload
         if binary:
             return result
@@ -234,11 +236,11 @@ if __name__ == "__main__":
 
     with d4.channel("EPSON-CTRL") as chan:
         for i in range(8):
-            print(i, chan.cmd3('vi', 1, 0, i)[6:-2])
+            print(i, chan.cmd2('vi', i)[6:-2])
 
-        print("di:", repr(chan.cmd3('di', 1, 0, 1)))
+        print("di:", repr(chan.cmd2('di', 1)))
 
-        st2 = chan.cmd3('st', 1, 0, 1, binary=True)
+        st2 = chan.cmd2('st', 1, binary=True)
         assert st2.startswith(b'@BDC ST2\r\n')
         length, = struct.unpack('<H', st2[10:12])
         st2 = st2[12:]

@@ -71,12 +71,12 @@ port = os.open(args.device, os.O_RDWR | os.O_SYNC)
 d4 = dirty4.Dirty4(port)
 
 with d4.channel("EPSON-CTRL") as chan:
-    version_info = strip_pref_suff(chan.cmd3('vi', 1, 0, 4), 'vi:04:')
+    version_info = strip_pref_suff(chan.cmd2('vi', 4), 'vi:04:')
     logging.info("Original firmware version: '%s'" % version_info)
 
-    strip_pref_suff(chan.cmd3('fl', 1, 0, 1), 'fl:')
+    strip_pref_suff(chan.cmd2('fl', 1), 'fl:')
 
-    gm_stat = strip_pref_suff(chan.cmd3('gm', 1, 0, 1), 'fl:01:')
+    gm_stat = strip_pref_suff(chan.cmd2('gm', 1), 'fl:01:')
 
     if gm_stat != 'OK':
         logging.error("Entering firmware download mode returned status '%s'" % gm_stat)
@@ -99,7 +99,7 @@ if progress:
     bar.close()
 
 with d4.channel("EPSON-CTRL") as chan:
-    gm_stat = strip_pref_suff(chan.cmd3('gm', 1, 0, 3), 'fl:03:')
+    gm_stat = strip_pref_suff(chan.cmd2('gm', 3), 'fl:03:')
 
     if gm_stat != 'OK':
         logging.warning("Leaving firmware download mode returned status '%s'" % gm_stat)
@@ -128,7 +128,7 @@ d4 = dirty4.Dirty4(port)
 logging.info("Waiting for printer to be ready...")
 with d4.channel("EPSON-CTRL") as chan:
     while True:
-        version_info = strip_pref_suff(chan.cmd3('vi', 1, 0, 4), 'vi:04:')
+        version_info = strip_pref_suff(chan.cmd2('vi', 4), 'vi:04:')
 
         if version_info != 'BUSY':
             break
