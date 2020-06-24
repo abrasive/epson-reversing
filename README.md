@@ -7,8 +7,7 @@ The `uncrom` tool allows you to unpack these.
 Usage:
 
 ```
-make
-./uncrom my_crom_file
+./uncrom.py my_crom_file
 ```
 
 This will produce `my_crom_file.0.bin` with the uncompressed data.
