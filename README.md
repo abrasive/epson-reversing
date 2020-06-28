@@ -51,19 +51,19 @@ because some people are flogging a modded firmware that ignores empty or unlicen
 
 On my XP-240, which has no LCD and six buttons on the front panel, you turn the printer off, then hold the two rightmost and two leftmost buttons (stop, colour copy, wifi, and power) for 2 seconds.
 The LEDs then turn on in a unique blink pattern to show it's in this mode.
-I think this mode runs the main firmware but doesn't initialise all the hardware; I call this "safe mode".
+I think this mode runs the main firmware but doesn't initialise all the hardware.
 
 There is a second recovery mode as well, accessed by stop, colour copy, info, and power.
-This one seems to be the actual bootloader - the device enumerates with a different USB ID (04b8:0007).
-So I call this "bootloader mode" to avoid confusion.
-(This bootloader can be found early in the second segment of the first EPSON IPL of the firmware.)
+This one seems to be the earliest bootloader - the device enumerates with a different USB ID (04b8:0007).
+This bootloader can be found early in the second segment of the first EPSON IPL of the firmware.
+I gather that Epson might call this "IPL Mode" and their regular firmware update tool doesn't seem to work with it.
 
 My printer firmware has two parts in the RCX: the second appears, perhaps, to be scanner firmware.
 Each starts with an EPSON IPL header and their lengths are stored in the RCX header.
 
-If I try and flash the whole thing in safe mode, the printer crashes.
+If I try and flash the whole thing in recovery mode, the printer crashes.
 But if I flash only the first block, it seems to succeed.
 So a switch to `epsflasher`, `--only-first-block`, allows you to just flash the first block, if this is what you need.
 
-I don't yet know how to detect that a printer is in safe mode.
-Recovery mode is easy; it will respond to any `vi` command for version info with `vi:NA`.
+I don't yet know how to detect that a printer is in recovery mode.
+IPL mode is easy; it will respond to any `vi` command for version info with `vi:NA`.
