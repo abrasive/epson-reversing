@@ -1,12 +1,12 @@
 # Super crude implementation of IEEE 1284.4.
-# Speaks the language but doesn't support multiple simultaneous transfers.
 
 from collections import defaultdict, namedtuple
 import struct
 import os
 import time
 import binascii
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List
 import logging
 
 log = logging.getLogger('dirty4')
@@ -41,6 +41,7 @@ class DirtyChannel:
     sid: int
     mtu: int
     credits: int = 0
+    rx_queue: List[D4Packet] = field(default_factory=list)
 
 class DirtyChannelContext(object):
     def __init__(self, d4, name):
@@ -83,7 +84,7 @@ class DirtyChannelContext(object):
 
     def read(self):
         self.d4.Credit(self.sid, 1)
-        return self.d4.read_packet()
+        return self.d4.read_packet(self.sid)
 
     def cmd2(self, name, payload, binary=False):
         assert len(name) == 2
@@ -155,20 +156,32 @@ class Dirty4(object):
         if self.channels[command.psid].credits:
             self.channels[command.psid].credits -= 1
 
-    def read_packet(self):
+    def read_packet(self, sid):
+        channel = self.channels[sid]
+
+        while not len(channel.rx_queue):
+            self.read_next_packet()
+
+        return channel.rx_queue.pop(0)
+
+    def read_next_packet(self):
         header_data = self._read(6)
         psid, ssid, length, credit, control = struct.unpack('>BBHBB', header_data)
-
-        if length > self.channels[psid].mtu:
-            raise ValueError("Received garbage data")
+        log.debug('< ' + ' '.join('%02x' % x for x in header_data))
 
         payload = self._read(length-6)
 
         log.debug('< ' + ' '.join('%02x' % x for x in header_data + payload))
 
-        self.channels[psid].credits += credit
+        if psid not in self.channels:
+            log.warning('Received packet for closed socket ID %d' % psid)
+            return
 
-        return D4Packet(psid, ssid, payload, credit, bool(control & 1), bool(control & 2))
+        channel = self.channels[psid]
+
+        channel.credits += credit
+
+        channel.rx_queue.append(D4Packet(psid, ssid, payload, credit, bool(control & 1), bool(control & 2)))
 
     def command(self, name, payload=b''):
         if name not in ['Init', 'Exit']:
@@ -177,7 +190,7 @@ class Dirty4(object):
         log.debug("%s %s" % (name, binascii.hexlify(payload)))
         cmd_byte = commands[name]
         self.write_packet(0, payload=bytearray([cmd_byte]) + payload)
-        resp = self.read_packet()
+        resp = self.read_packet(0)
 
         assert resp.psid == 0
 
@@ -212,6 +225,7 @@ class Dirty4(object):
     def CloseChannel(self, sid):
         req = struct.pack('>BB', sid, sid)
         self.command("CloseChannel", req)
+        self.channels.pop(sid)
 
     def Credit(self, sid, amount):
         req = struct.pack('>BBH', sid, sid, amount)
