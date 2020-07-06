@@ -33,6 +33,8 @@ class CROMReader(object):
         soi = self.stream.read(6)
         if len(soi) < 6:
             raise EOFError()
+        if soi == b'\xff' * len(soi):
+            raise EOFError()
         soi_mark, length = struct.unpack('>HL', soi)
         assert soi_mark == 0xffd8
 
@@ -140,3 +142,4 @@ if __name__ == "__main__":
     for i, data in enumerate(crom.unpack_all()):
         outname = filename + '.%d.bin' % i
         open(outname, 'wb').write(data)
+    print("CROM data ended at file offset %x" % crom.stream.tell())
