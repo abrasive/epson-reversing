@@ -1,0 +1,54 @@
+#!/usr/bin/env python
+
+import pathlib
+import sys
+import rcx
+import struct
+
+data = open(sys.argv[1], 'rb').read()
+outdir = pathlib.Path(sys.argv[2])
+outdir.mkdir(exist_ok=True)
+
+header_len, cfg = rcx.parse_rcx(data)
+pointer = header_len
+
+with open(outdir / 'rcx_header', 'w') as fp:
+    fp.write(data[:header_len].decode('ascii'))
+
+num_ipls = 0
+
+def unpack_ipl(index, data):
+    with open(outdir / ('ipl_%d' % index), 'wb') as fp:
+        fp.write(data)
+
+    header = data[:0x1000]
+    data = data[0x1000:]
+    segment_record_bytes, = struct.unpack('<H', header[0xe:0x10])
+    assert segment_record_bytes == 3*0x24
+
+    segments_found = 0
+
+    for i in range(3):
+        base = 0x10 + 0x24*i
+        segment_header = header[base:base+0x24]
+        length, = struct.unpack('<L', segment_header[0xc:0x10])
+        if length:
+            with open(outdir / ('ipl_%d_seg%d' % (index, segments_found)), 'wb') as fp:
+                fp.write(data[:length])
+            data = data[length:]
+            segments_found += 1
+
+    if len(data):
+        print("Unknown data left over in ipl_%d" % index)
+
+for name, section in cfg.items():
+    if name.startswith('Z_'):
+        length = int(section['5'])
+        if data[pointer:pointer+9] == b'EPSON IPL':
+            unpack_ipl(num_ipls, data[pointer:pointer+length])
+            num_ipls += 1
+        else:
+            print("Unknown section at RCX file offset 0x%x, skipping" % pointer)
+        pointer += length
+        if pointer >= len(data):
+            break
