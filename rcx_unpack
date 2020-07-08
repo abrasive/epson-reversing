@@ -5,50 +5,48 @@ import sys
 import rcx
 import struct
 
-data = open(sys.argv[1], 'rb').read()
+infile = open(sys.argv[1], 'rb')
 outdir = pathlib.Path(sys.argv[2])
 outdir.mkdir(exist_ok=True)
 
-header_len, cfg = rcx.parse_rcx(data)
-pointer = header_len
+rcx_header = bytearray(infile.read(1))
+while rcx_header[-1:] != b'\f':
+    rcx_header.extend(infile.read(1))
 
 with open(outdir / 'rcx_header', 'w') as fp:
-    fp.write(data[:header_len].decode('ascii'))
+    fp.write(rcx_header.decode('ascii'))
 
-num_ipls = 0
-
-def unpack_ipl(index, data):
-    with open(outdir / ('ipl_%d' % index), 'wb') as fp:
-        fp.write(data)
-
-    header = data[:0x1000]
-    data = data[0x1000:]
+def unpack_ipl(infile, index):
+    header = infile.read(0x1000)
     segment_record_bytes, = struct.unpack('<H', header[0xe:0x10])
     assert segment_record_bytes == 3*0x24
 
-    segments_found = 0
+    segments_found = []
 
     for i in range(3):
         base = 0x10 + 0x24*i
         segment_header = header[base:base+0x24]
         length, = struct.unpack('<L', segment_header[0xc:0x10])
         if length:
-            with open(outdir / ('ipl_%d_seg%d' % (index, segments_found)), 'wb') as fp:
-                fp.write(data[:length])
-            data = data[length:]
-            segments_found += 1
+            segments_found.append(length)
 
-    if len(data):
-        print("Unknown data left over in ipl_%d" % index)
+    with open(outdir / ('ipl_%d_hdr' % index), 'wb') as fp:
+        fp.write(header)
+    for seg, length in enumerate(segments_found):
+        with open(outdir / ('ipl_%d_seg%d' % (index, seg)), 'wb') as fp:
+            fp.write(infile.read(length))
 
-for name, section in cfg.items():
-    if name.startswith('Z_'):
-        length = int(section['5'])
-        if data[pointer:pointer+9] == b'EPSON IPL':
-            unpack_ipl(num_ipls, data[pointer:pointer+length])
-            num_ipls += 1
-        else:
-            print("Unknown section at RCX file offset 0x%x, skipping" % pointer)
-        pointer += length
-        if pointer >= len(data):
-            break
+index = 0
+while True:
+    pos = infile.tell()
+    signature = infile.read(9)
+    if signature == b'':    # EOW
+        break
+    infile.seek(pos, 0)
+
+    if signature != b'EPSON IPL':
+        print("ERROR: unexpected data at offset 0x%x" % pos)
+        sys.exit(1)
+
+    unpack_ipl(infile, index)
+    index += 1
